@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -e
+#trap clean SIGINT SIGTERM EXIT
+
+check_for()
+{
+    if ! which $1 >/dev/null 2>&1 ;then
+        echo "Cannot find $1" >&2
+        exit 1
+    fi
+}
+
+check_for unzip
+check_for curl
+
+initialize()
+{
+    order=0
+    for i in $@; do
+        order_str=$(printf "%02d" $order)
+        PATCH_IDS[$order_str]=$i
+        order=$(($order+1))
+    done
+
+    patch_ids_len=$((${#PATCH_IDS[@]} - 1))
+    patch_ids_seq=$(seq -f '%02.0f' 0 $patch_ids_len)
+    dir=$(mktemp -d)
+}
+
+clean()
+{
+    [ -z "${dir}" ] || rm -rf ${dir}
+}
+
+get_patches()
+{
+    for i in $patch_ids_seq; do
+        patch=${PATCH_IDS[$i]}
+        curl -s -o $i-patch-${patch}.zip \
+             https://review.openstack.org/changes/${patch}/revisions/current/patch?zip &
+    done
+    wait
+}
+
+get_patches_info()
+{
+    for i in $patch_ids_seq; do
+        patch=${PATCH_IDS[$i]}
+        zip="$i-patch-${patch}.zip"
+        unzip -o ${zip} >/dev/null
+        unzip -l ${zip} | awk 'NR>3{printf "%s,", $NF; exit}' > $dir/$zip &
+        curl -s https://review.openstack.org/changes/$patch/detail |\
+            awk -F: -v cnt=$i '{gsub(/( "|"|,)/,"",$2)};
+             /project/{p=gensub(/.*\/(.*)/, "\\1", "g", $2)}
+             /_revision_number/{nr=gensub(/.*([0-9]+).*/, "\\1", "g", $2); if (r<nr){r=nr}}
+             /subject/{s=$2};
+             /branch/{b=$2};
+             /status/{t=$2};
+             /_number/{n=$2};
+             /mergeable/{m=gensub(/ *([a-z]+) */, "\\1", "g", $2)};
+             END{printf "%s,%s,%s,%s,%s,%s,%s,%s\n", cnt, p, r, s, b, t, n, m}'  >> $dir/$zip &
+    done
+    wait
+}
+
+rename_patches_file()
+{
+    ls -1v $dir/* | xargs cat | while IFS=, read name cnt project revision rest; do
+        patch=${PATCH_IDS[$cnt]}
+        zip="$cnt-patch-${patch}.zip"
+        mv $name $cnt-@${project}@-patch-${patch}-${revision}-${name}
+        rm ${zip}
+    done
+}
+
+display_summary()
+{
+    ls -1v $dir/* | xargs cat | while IFS=, read name count project revision subject branch status number mergeable; do
+        echo "${count} ${PATCH_IDS[$count]}-r${revision} [${branch}] ${subject} s:${status} m:${mergeable}"
+    done
+}
+
+declare -A PATCH_IDS
+initialize $@
+
+get_patches
+
+get_patches_info
+
+rename_patches_file
+
+display_summary

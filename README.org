@@ -1,0 +1,65 @@
+* Get My Gerrit patches!
+
+Sometimes you need to pull a lot patches from gerrit that are still
+under review to test a bigger feature.  They have to be apply in a
+certain order, and you want to be able to report which patch you've
+applied.
+
+This become a nightmare to follow as review are pushed and you don't
+know which one you got and which one you didn't.
+
+I developed this to help me solving this.
+
+#+BEGIN_SRC sh :results verbatim variable
+  gmgp 275442 275448 264963 269883
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+  00 275442-r2 [stable/liberty] Fix endpoint names s:NEW m:true
+  01 275448-r4 [stable/liberty] Generate the endpoint map statically s:NEW m:true
+  02 264963-r2 [stable/liberty] Add Management Network For System Administration. s:NEW m:true
+  03 269883-r2 [stable/liberty] Add IPv6 versions of the Controller NIC configs s:NEW m:true
+
+#+END_EXAMPLE
+The output, which is duplicated in the =patches= file gives you:
+ 1. the order;
+ 2. the change number;
+ 3. the revision;
+ 4. the branch;
+ 5. the subject;
+ 6. the status;
+ 7. the mergeable status;
+
+Now, the files created keep most of this information:
+
+#+BEGIN_SRC sh :results verbatim variable
+  ls -lv
+#+END_SRC
+
+#+BEGIN_EXAMPLE
+  00-@tripleo-heat-templates@-patch-275442-2-7680f908.diff
+  01-@tripleo-heat-templates@-patch-275448-4-e6603f8b.diff
+  02-@tripleo-heat-templates@-patch-264963-2-97efc148.diff
+  03-@tripleo-heat-templates@-patch-269883-2-276e54d8.diff
+  patches
+
+#+END_EXAMPLE
+
+You can then go to the branch you diverting from and add the diff and
+merge and resolve conflict and be happy about it.
+
+In this case:
+
+#+BEGIN_SRC sh :results verbatim variable
+  git clone https://review.openstack.org/p/openstack/tripleo-heat-templates
+  cd tripleo-heat-templates
+  git checkout -b mypatches
+
+  cat ../patches/00-@tripleo-heat-templates@-patch-275442-2-7680f908.diff | git am -p1 -3
+#+END_SRC
+
+Using =git am= enables you to keep the full history in your branch.
+
+Now fire =emacs= and use =Magit= to resolve the conflicts.
+
+That's all folks.
