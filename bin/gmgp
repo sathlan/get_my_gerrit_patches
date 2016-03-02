@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -e
-#trap clean SIGINT SIGTERM EXIT
+trap clean SIGINT SIGTERM EXIT
 
 check_for()
 {
