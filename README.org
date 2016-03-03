@@ -120,7 +120,7 @@ Manipulate gerrit patches easily.
   #+END_SRC
   
   This doesn't work.  =sleep= is executed in a subshell because of the
-  pipe =|=, now when the block is done that subshell is discard and
+  pipe =|=, now when the block is done that subshell is discarded and
   your =sleep= get attached to =pid 1=.  You're waiting nothing.
 
   To fix that you shouldn't start a subshell, and here, how it's done:
