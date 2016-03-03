@@ -2,7 +2,7 @@
 
 Manipulate gerrit patches easily.
 
-** Pulling a lot of patch for merging
+** Pulling a lot of patches for merging
 
  Sometimes you need to pull a lot patches from gerrit that are still
  under review to test a bigger feature.  They have to be apply in a
@@ -88,7 +88,7 @@ Manipulate gerrit patches easily.
    Now solve the conflict, amend the commit adding the =(cherry picked
    from commit <master_commit_id>)= line and be done with it.
 
-** Get the list of related change of a list of change in Gerrit
+** Get the list of related changes of a list of changes in Gerrit
 
    If you want to check that you're not missing anything from a change
    (for backport for instance), then you can have a list of all the
