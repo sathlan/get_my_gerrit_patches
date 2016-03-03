@@ -112,7 +112,7 @@ Manipulate gerrit patches easily.
   One little thing that baffled me at the beginning was this:
 
   #+BEGIN_SRC sh :results verbatim variable
-    echo -e "10\n20\n30\n" | while read var ; do
+    echo -e "10\n20\n30" | while read var ; do
         sleep $var &
     done
     wait
@@ -128,7 +128,7 @@ Manipulate gerrit patches easily.
   #+BEGIN_SRC sh :results verbatim variable
     while read var ; do
         sleep $var &
-    done < <(echo -e "10\n20\n30\n")
+    done < <(echo -e "10\n20\n30")
     wait
 
   #+END_SRC
