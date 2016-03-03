@@ -2,6 +2,20 @@
 set -e
 trap clean SIGINT SIGTERM EXIT
 
+ACTION_LIST_PATCH=""
+while getopts :l OPT; do
+    case $OPT in
+        l|+l)
+            ACTION_LIST_PATCH=true
+            ;;
+        *)
+            echo "usage: ${0##*/} [+-l} [--] ARGS..."
+            exit 2
+    esac
+done
+shift $(( OPTIND - 1 ))
+OPTIND=1
+
 check_for()
 {
     if ! which $1 >/dev/null 2>&1 ;then
@@ -30,6 +44,8 @@ initialize()
 clean()
 {
     [ -z "${dir}" ] || rm -rf ${dir}
+    [ -z "${dir_related_tmp}" ] || rm -rf ${dir_related_tmp}
+    [ -z "${dir_related}" ] || rm -rf ${dir_related}
 }
 
 get_patches()
@@ -40,6 +56,22 @@ get_patches()
              https://review.openstack.org/changes/${patch}/revisions/current/patch?zip &
     done
     wait
+    for i in $patch_ids_seq; do
+        patch=${PATCH_IDS[$i]}
+        zip="$i-patch-${patch}.zip"
+        unzip -o ${zip} >/dev/null
+        unzip -l ${zip} | awk 'NR>3{printf ",%s", $NF; exit}' >> $dir/$zip &
+    done
+    wait
+}
+
+close_patch_info_file()
+{
+    for i in $patch_ids_seq; do
+        patch=${PATCH_IDS[$i]}
+        zip="$i-patch-${patch}.zip"
+        printf "\n" >> $dir/$zip
+    done
 }
 
 get_patches_info()
@@ -47,35 +79,58 @@ get_patches_info()
     for i in $patch_ids_seq; do
         patch=${PATCH_IDS[$i]}
         zip="$i-patch-${patch}.zip"
-        unzip -o ${zip} >/dev/null
-        unzip -l ${zip} | awk 'NR>3{printf "%s,", $NF; exit}' > $dir/$zip &
         curl -s https://review.openstack.org/changes/$patch/detail |\
             awk -F: -v cnt=$i '{gsub(/( "|"|,)/,"",$2)};
              /project/{p=gensub(/.*\/(.*)/, "\\1", "g", $2)}
-             /_revision_number/{nr=gensub(/.*([0-9]+).*/, "\\1", "g", $2); if (r<nr){r=nr}}
+             /_revision_number/{nr=gensub(/ *([0-9]+) */, "\\1", "g", $2); r=r+0; nr=nr+0;if (r<nr){r=nr}}
              /subject/{s=$2};
              /branch/{b=$2};
              /status/{t=$2};
              /_number/{n=$2};
              /mergeable/{m=gensub(/ *([a-z]+) */, "\\1", "g", $2)};
-             END{printf "%s,%s,%s,%s,%s,%s,%s,%s\n", cnt, p, r, s, b, t, n, m}'  >> $dir/$zip &
+             END{printf "%s,%s,%s,%s,%s,%s,%s,%s", cnt, p, r, s, b, t, n, m}'  > $dir/$zip &
     done
     wait
 }
 
+get_related_patches()
+{
+    dir_related_tmp=$(mktemp -d)
+    dir_related=$(mktemp -d)
+    # Do not pipe like that: ls -1v $dir/* | xargs cat | while ....
+    # it creates a subshell and then the curl become parentless at the
+    # end of the loop and we cannot "wait" for it.
+    while IFS=, read count project revision subject branch status number mergeable name; do
+        local count_number=$( echo $count | sed -Ee 's/0*(.+)/\1/g')
+        echo ${PATCH_IDS[$count]} > $dir_related/$((1000 + ${count_number}))
+        curl -s \
+             https://review.openstack.org/changes/${PATCH_IDS[$count]}/revisions/current/related > \
+             $dir_related_tmp/$count &
+    done < <(ls -1v $dir/* | xargs cat)
+
+    wait
+
+    ls -1v $dir/* | xargs cat | while IFS=, read count project revision subject branch status number mergeable name; do
+        cat $dir_related_tmp/$count | awk -F: '/_change_number/{print gensub(/[, ]/,"","g",$2)}' > $dir_related/$count
+    done
+
+    cat $dir_related/* | sort -u | tr '\n' ' '
+    echo
+}
+
 rename_patches_file()
 {
-    ls -1v $dir/* | xargs cat | while IFS=, read name cnt project revision rest; do
-        patch=${PATCH_IDS[$cnt]}
-        zip="$cnt-patch-${patch}.zip"
-        mv $name $cnt-@${project}@-patch-${patch}-${revision}-${name}
+    ls -1v $dir/* | xargs cat | while IFS=, read count project revision subject branch status number mergeable name; do
+        patch=${PATCH_IDS[$count]}
+        zip="$count-patch-${patch}.zip"
+        mv $name $count-@${project}@-patch-${patch}-${revision}-${name}
         rm ${zip}
     done
 }
 
 display_summary()
 {
-    ls -1v $dir/* | xargs cat | while IFS=, read name count project revision subject branch status number mergeable; do
+    ls -1v $dir/* | xargs cat | while IFS=, read count project revision subject branch status number mergeable name; do
         echo "${count} ${PATCH_IDS[$count]}-r${revision} [${branch}] ${subject} s:${status} m:${mergeable}"
     done
 }
@@ -83,10 +138,20 @@ display_summary()
 declare -A PATCH_IDS
 initialize $@
 
-get_patches
-
 get_patches_info
 
-rename_patches_file
+if [ -z "$ACTION_LIST_PATCH" ]; then
+    get_patches
+fi
 
-display_summary
+close_patch_info_file
+
+if [ -n "$ACTION_LIST_PATCH" ]; then
+    get_related_patches
+fi
+
+if [ -z "$ACTION_LIST_PATCH" ]; then
+    rename_patches_file
+    display_summary
+fi
+
