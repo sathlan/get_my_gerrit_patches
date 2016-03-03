@@ -1,65 +1,136 @@
 * Get My Gerrit patches!
 
-Sometimes you need to pull a lot patches from gerrit that are still
-under review to test a bigger feature.  They have to be apply in a
-certain order, and you want to be able to report which patch you've
-applied.
+Manipulate gerrit patches easily.
 
-This become a nightmare to follow as review are pushed and you don't
-know which one you got and which one you didn't.
+** Pulling a lot of patch for merging
 
-I developed this to help me solving this.
+ Sometimes you need to pull a lot patches from gerrit that are still
+ under review to test a bigger feature.  They have to be apply in a
+ certain order, and you want to be able to report which patch you've
+ applied.
 
-#+BEGIN_SRC sh :results verbatim variable
-  gmgp 275442 275448 264963 269883
-#+END_SRC
+ This become a nightmare to follow as review are pushed and you don't
+ know which one you got and which one you didn't.
 
-#+BEGIN_EXAMPLE
-  00 275442-r2 [stable/liberty] Fix endpoint names s:NEW m:true
-  01 275448-r4 [stable/liberty] Generate the endpoint map statically s:NEW m:true
-  02 264963-r2 [stable/liberty] Add Management Network For System Administration. s:NEW m:true
-  03 269883-r2 [stable/liberty] Add IPv6 versions of the Controller NIC configs s:NEW m:true
+ I developed this to help me solving this.
 
-#+END_EXAMPLE
-The output, which is duplicated in the =patches= file gives you:
- 1. the order;
- 2. the change number;
- 3. the revision;
- 4. the branch;
- 5. the subject;
- 6. the status;
- 7. the mergeable status;
+ #+BEGIN_SRC sh :results verbatim variable
+   gmgp 275442 275448 264963 269883
+ #+END_SRC
 
-Now, the files created keep most of this information:
+ #+BEGIN_EXAMPLE
+   00 275442-r2 [stable/liberty] Fix endpoint names s:NEW m:true
+   01 275448-r4 [stable/liberty] Generate the endpoint map statically s:NEW m:true
+   02 264963-r2 [stable/liberty] Add Management Network For System Administration. s:NEW m:true
+   03 269883-r2 [stable/liberty] Add IPv6 versions of the Controller NIC configs s:NEW m:true
 
-#+BEGIN_SRC sh :results verbatim variable
-  ls -lv
-#+END_SRC
+ #+END_EXAMPLE
+ The output, which is duplicated in the =patches= file gives you:
+  1. the order;
+  2. the change number;
+  3. the revision;
+  4. the branch;
+  5. the subject;
+  6. the status;
+  7. the mergeable status;
 
-#+BEGIN_EXAMPLE
-  00-@tripleo-heat-templates@-patch-275442-2-7680f908.diff
-  01-@tripleo-heat-templates@-patch-275448-4-e6603f8b.diff
-  02-@tripleo-heat-templates@-patch-264963-2-97efc148.diff
-  03-@tripleo-heat-templates@-patch-269883-2-276e54d8.diff
-  patches
+ Now, the files created keep most of this information:
 
-#+END_EXAMPLE
+ #+BEGIN_SRC sh :results verbatim variable
+   ls -lv
+ #+END_SRC
 
-You can then go to the branch you diverting from and add the diff and
-merge and resolve conflict and be happy about it.
+ #+BEGIN_EXAMPLE
+   00-@tripleo-heat-templates@-patch-275442-2-7680f908.diff
+   01-@tripleo-heat-templates@-patch-275448-4-e6603f8b.diff
+   02-@tripleo-heat-templates@-patch-264963-2-97efc148.diff
+   03-@tripleo-heat-templates@-patch-269883-2-276e54d8.diff
+   patches
 
-In this case:
+ #+END_EXAMPLE
 
-#+BEGIN_SRC sh :results verbatim variable
-  git clone https://review.openstack.org/p/openstack/tripleo-heat-templates
-  cd tripleo-heat-templates
-  git checkout -b mypatches
+ You can then go to the branch you diverting from and add the diff and
+ merge and resolve conflict and be happy about it.
 
-  cat ../patches/00-@tripleo-heat-templates@-patch-275442-2-7680f908.diff | git am -p1 -3
-#+END_SRC
+ In this case:
 
-Using =git am= enables you to keep the full history in your branch.
+ #+BEGIN_SRC sh :results verbatim variable
+   git clone https://review.openstack.org/p/openstack/tripleo-heat-templates
+   cd tripleo-heat-templates
+   git checkout -b mypatches
 
-Now fire =emacs= and use =Magit= to resolve the conflicts.
+   cat ../patches/00-@tripleo-heat-templates@-patch-275442-2-7680f908.diff | git am -p1 -3
+ #+END_SRC
 
-That's all folks.
+ Using =git am= enables you to keep the full history in your branch.
+
+ Now fire =emacs= and use =Magit= to resolve the conflicts.
+
+** Cherry pick one patch from gerrit when there is a merge conflict
+
+   Say you have change 234567 from master to backport to stable/old,
+   but it doesn't apply cleany
+
+   #+BEGIN_SRC sh :results verbatim variable
+     git checkout stable/old
+     git pull
+
+     git checkout -b topic_branch_from_the_backport
+     gmgp 234567
+     cat 00-* | git am -p1 -3
+
+   #+END_SRC
+   
+   #+BEGIN_EXAMPLE
+     00 234567-r2 [master] Flavors in Openstack operations guide updated s:Patch Set 2 m:
+   #+END_EXAMPLE
+
+   Now solve the conflict, amend the commit adding the =(cherry picked
+   from commit <master_commit_id>)= line and be done with it.
+
+** Get the list of related change of a list of change in Gerrit
+
+   If you want to check that you're not missing anything from a change
+   (for backport for instance), then you can have a list of all the
+   changes related to the list of changes you have to backport:
+
+   #+BEGIN_SRC sh :results verbatim variable
+     gmpg -l 275442 275448 264963 269883
+   #+END_SRC
+   
+   #+BEGIN_EXAMPLE
+     264963 268833 269883 275442 275448 287599 287600 287601 287602 287603
+   #+END_EXAMPLE
+
+   And then you have more work.  Duplicate are removed from the list.
+
+* Information about the implementation.
+
+  Well it's bash, but it's O(1) bash style.  So whatever the number of
+  patches you give it, the time to wait won't explode.
+
+  One little thing that baffled me at the beginning was this:
+
+  #+BEGIN_SRC sh :results verbatim variable
+    echo -e "10\n20\n30\n" | while read var ; do
+        sleep $var &
+    done
+    wait
+
+  #+END_SRC
+  
+  This doesn't work.  =sleep= is executed in a subshell because of the
+  pipe =|=, now when the block is done that subshell is discard and
+  your =sleep= get attached to =pid 1=.  You're waiting nothing.
+
+  To fix that you shouldn't start a subshell, and here, how it's done:
+
+  #+BEGIN_SRC sh :results verbatim variable
+    while read var ; do
+        sleep $var &
+    done < <(echo -e "10\n20\n30\n")
+    wait
+
+  #+END_SRC
+  
+  This, works as expected.
