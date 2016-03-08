@@ -43,9 +43,10 @@ initialize()
 
 clean()
 {
-    [ -z "${dir}" ] || rm -rf ${dir}
-    [ -z "${dir_related_tmp}" ] || rm -rf ${dir_related_tmp}
-    [ -z "${dir_related}" ] || rm -rf ${dir_related}
+    [ -z "${dir}" ]               || rm -rf ${dir}
+    [ -z "${dir_related_tmp}" ]   || rm -rf ${dir_related_tmp}
+    [ -z "${dir_related}" ]       || rm -rf ${dir_related}
+    [ -z "${dir_branches_info}" ] || rm -rf ${dir_branches_info}
 }
 
 get_patches()
@@ -59,8 +60,8 @@ get_patches()
     for i in $patch_ids_seq; do
         patch=${PATCH_IDS[$i]}
         zip="$i-patch-${patch}.zip"
-        unzip -o ${zip} >/dev/null
-        unzip -l ${zip} | awk 'NR>3{printf ",%s", $NF; exit}' >> $dir/$zip &
+        unzip -p ${zip} >> ./${zip%.zip}.diff &
+        echo -en ",${zip%.zip}.diff" >>  $dir/$zip
     done
     wait
 }
@@ -81,16 +82,42 @@ get_patches_info()
         zip="$i-patch-${patch}.zip"
         curl -s https://review.openstack.org/changes/$patch/detail |\
             awk -F: -v cnt=$i '{gsub(/( "|"|,)/,"",$2)};
-             /project/{p=gensub(/.*\/(.*)/, "\\1", "g", $2)}
-             /_revision_number/{nr=gensub(/ *([0-9]+) */, "\\1", "g", $2); r=r+0; nr=nr+0;if (r<nr){r=nr}}
-             /subject/{s=$2};
-             /branch/{b=$2};
-             /status/{t=$2};
-             /_number/{n=$2};
-             /mergeable/{m=gensub(/ *([a-z]+) */, "\\1", "g", $2)};
-             END{printf "%s,%s,%s,%s,%s,%s,%s,%s", cnt, p, r, s, b, t, n, m}'  > $dir/$zip &
+             /"project"/{p=gensub(/.*\/(.*)/, "\\1", "g", $2)}
+             /"_revision_number"/{nr=gensub(/ *([0-9]+) */, "\\1", "g", $2); r=r+0; nr=nr+0;if (r<nr){r=nr}}
+             /"subject"/{s=$2};
+             /"branch"/{b=$2};
+             /"status"/{t=$2};
+             /"_number"/{n=$2};
+             /"mergeable"/{m=gensub(/ *([a-z]+) */, "\\1", "g", $2)};
+             /"change_id"/{c=$2};
+             END{printf "%s,%s,%s,%s,%s,%s,%s,%s,%s", cnt, p, r, s, b, t, n, m, c}'  > $dir/$zip &
     done
     wait
+}
+
+get_patches_branches_info()
+{
+    dir_branches_info=$(mktemp -d)
+    while IFS=, read count project revision subject branch status number mergeable change_id name; do
+        curl -s \
+             https://review.openstack.org/changes/?q=${change_id} > \
+             $dir_branches_info/${PATCH_IDS[$count]} &
+    done < <(ls -1v $dir/* | xargs cat)
+    wait
+
+    local sep=$(printf -- '-%.0s' {1..150})
+    echo $sep
+    for i in ${dir_branches_info}/*; do
+        local change=${i##*/}
+        awk -v c=$change -F: '{gsub(/( "|"|,)/,"",$2)};
+         /"branch"/{b=$2; go=0};
+         /"status"/{s=$2; go=0};
+         /"subject"/{t=$2; go=0};
+         /"_number"/{n=gensub(/ *([^[:blank:]]+) */, "\\1", "g", $2);go=1};
+         { if (n == c) {color="\033[0;31m"} else {color=""}}
+         { if(go==1) {printf "%s%-8s %-20s %-10s %-10s %s\033[0m\n", color, c, b, s, n, t ; color="";go=0} }' $i
+        echo $sep
+    done
 }
 
 get_related_patches()
@@ -100,7 +127,7 @@ get_related_patches()
     # Do not pipe like that: ls -1v $dir/* | xargs cat | while ....
     # it creates a subshell and then the curl become parentless at the
     # end of the loop and we cannot "wait" for it.
-    while IFS=, read count project revision subject branch status number mergeable name; do
+    while IFS=, read count project revision subject branch status number mergeable change_id name; do
         local count_number=$( echo $count | sed -Ee 's/0*(.+)/\1/g')
         echo ${PATCH_IDS[$count]} > $dir_related/$((1000 + ${count_number}))
         curl -s \
@@ -110,17 +137,17 @@ get_related_patches()
 
     wait
 
-    ls -1v $dir/* | xargs cat | while IFS=, read count project revision subject branch status number mergeable name; do
+    ls -1v $dir/* | xargs cat | while IFS=, read count project revision subject branch status number mergeable change_id name; do
         cat $dir_related_tmp/$count | awk -F: '/_change_number/{print gensub(/[, ]/,"","g",$2)}' > $dir_related/$count
     done
-
+    echo -n "Related changes: "
     cat $dir_related/* | sort -u | tr '\n' ' '
-    echo
+    echo -en "\n\n"
 }
 
 rename_patches_file()
 {
-    ls -1v $dir/* | xargs cat | while IFS=, read count project revision subject branch status number mergeable name; do
+    ls -1v $dir/* | xargs cat | while IFS=, read count project revision subject branch status number mergeable change_id name; do
         patch=${PATCH_IDS[$count]}
         zip="$count-patch-${patch}.zip"
         mv $name $count-@${project}@-patch-${patch}-${revision}-${name}
@@ -130,7 +157,7 @@ rename_patches_file()
 
 display_summary()
 {
-    ls -1v $dir/* | xargs cat | while IFS=, read count project revision subject branch status number mergeable name; do
+    ls -1v $dir/* | xargs cat | while IFS=, read count project revision subject branch status number mergeable change_id name; do
         echo "${count} ${PATCH_IDS[$count]}-r${revision} [${branch}] ${subject} s:${status} m:${mergeable}"
     done
 }
@@ -148,10 +175,10 @@ close_patch_info_file
 
 if [ -n "$ACTION_LIST_PATCH" ]; then
     get_related_patches
+    get_patches_branches_info
 fi
 
 if [ -z "$ACTION_LIST_PATCH" ]; then
     rename_patches_file
     display_summary
 fi
-
